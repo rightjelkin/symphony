@@ -13,7 +13,7 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 ## How it works
 
-1. Polls the configured tracker (Linear or GitHub Issues) for candidate work
+1. Polls the configured tracker (Linear, GitHub Issues, or YouGile) for candidate work
 2. Creates an isolated workspace per issue
 3. Launches the configured coding agent (Codex or Claude) inside the workspace
 4. Sends a workflow prompt to the agent
@@ -33,6 +33,7 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
    - **Linear**: Get a personal token via Settings → Security & access → Personal API keys, and set
      it as `LINEAR_API_KEY`.
    - **GitHub**: Set `GITHUB_TOKEN` with an access token that has Issues read/write permissions.
+   - **YouGile**: Set `YOUGILE_TOKEN` with an API key (see [YouGile API docs](https://ru.yougile.com/api-v2#/)).
 3. Copy this directory's `WORKFLOW.md` to your repo.
 4. Optionally copy the `commit`, `push`, `pull`, `land`, and `linear` skills to your repo.
    - The `linear` skill expects Symphony's `linear_graphql` app-server tool for raw Linear GraphQL
@@ -44,6 +45,9 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
      customize them in Team Settings → Workflow in Linear.
    - **GitHub**: Set `tracker.repo` to `owner/repo` and optionally `tracker.label_prefix` (default:
      `symphony`). Issues are tracked via labels like `symphony:todo`, `symphony:in-progress`, etc.
+   - **YouGile**: Set `yougile.board_id` to your board UUID and configure `yougile.columns` to map
+     Symphony states to column UUIDs. Optionally set `yougile.priority_sticker_id` for priority
+     support via a numeric sticker.
 6. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
@@ -157,11 +161,42 @@ You are working on issue {{ issue.identifier }}.
 Title: {{ issue.title }} Body: {{ issue.description }}
 ```
 
+Minimal example (YouGile + Claude):
+
+```md
+---
+yougile:
+  board_id: "your-board-uuid"
+  columns:
+    todo: "column-uuid-todo"
+    in-progress: "column-uuid-in-progress"
+    done: "column-uuid-done"
+    cancelled: "column-uuid-cancelled"
+  priority_sticker_id: "sticker-uuid"
+workspace:
+  root: ~/code/workspaces
+hooks:
+  after_create: |
+    git clone git@github.com:your-org/your-repo.git .
+agent:
+  kind: claude
+  max_concurrent_agents: 5
+  max_turns: 20
+claude:
+  command: symphony-claude
+---
+
+You are working on task {{ issue.identifier }}.
+
+Title: {{ issue.title }} Body: {{ issue.description }}
+```
+
 Notes:
 
 - If a value is missing, defaults are used.
-- **Tracker backends**: `linear`, `github` (default), `memory` (testing). Detected automatically
-  from which YAML section (`linear:`, `github:`, or `memory:`) is present in the front matter.
+- **Tracker backends**: `linear`, `github` (default), `yougile`, `memory` (testing). Detected
+  automatically from which YAML section (`linear:`, `github:`, `yougile:`, or `memory:`) is present
+  in the front matter.
 - **Coding agent backends**: `codex`, `claude` (default). Detected automatically from which YAML
   section (`codex:` or `claude:`) is present in the front matter.
 - **Codex-specific policy settings** (only apply when using `codex:` backend):
@@ -184,6 +219,8 @@ Notes:
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
 - For GitHub tracker, `GITHUB_TOKEN` is used for API authentication.
+- For YouGile tracker, `YOUGILE_TOKEN` is used for API authentication. Column UUIDs for state
+  mapping are configured under `yougile.columns`.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` / `claude.command` stays a shell command string and any `$VAR` expansion

@@ -49,6 +49,7 @@ defmodule SymphonyElixir.Tracker do
     case Config.tracker_kind() do
       "memory" -> SymphonyElixir.Memory.Tracker
       "linear" -> SymphonyElixir.Linear.Tracker
+      "yougile" -> SymphonyElixir.YouGile.Tracker
       _ -> SymphonyElixir.GitHub.Tracker
     end
   end

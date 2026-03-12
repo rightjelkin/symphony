@@ -224,6 +224,21 @@ defmodule SymphonyElixir.TestSupport do
     |> Enum.join("\n")
   end
 
+  defp tracker_backend_yaml("yougile", config) do
+    board_id = Keyword.get(config, :tracker_board_id)
+    columns = Keyword.get(config, :tracker_columns)
+    priority_sticker_id = Keyword.get(config, :tracker_priority_sticker_id)
+
+    [
+      "yougile:",
+      board_id && "  board_id: #{yaml_value(board_id)}",
+      columns && "  columns: #{yaml_value(columns)}",
+      priority_sticker_id && "  priority_sticker_id: #{yaml_value(priority_sticker_id)}"
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
   defp tracker_backend_yaml("memory", _config), do: "memory: {}"
   defp tracker_backend_yaml(nil, _config), do: nil
   defp tracker_backend_yaml(_kind, _config), do: nil
