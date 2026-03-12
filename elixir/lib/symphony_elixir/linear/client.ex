@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, Linear.Issue}
+  alias SymphonyElixir.{Config, Issue, Linear}
 
   @issue_page_size 50
   @max_error_body_log_bytes 1_000
@@ -105,19 +105,18 @@ defmodule SymphonyElixir.Linear.Client do
 
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do
-    tracker = Config.settings!().tracker
-    project_slug = tracker.project_slug
+    project_slug = Linear.Config.project_slug()
 
     cond do
-      is_nil(tracker.api_key) ->
+      is_nil(Linear.Config.api_key()) ->
         {:error, :missing_linear_api_token}
 
       is_nil(project_slug) ->
-        {:error, :missing_linear_project_slug}
+        {:error, :missing_project_slug}
 
       true ->
         with {:ok, assignee_filter} <- routing_assignee_filter() do
-          do_fetch_by_states(project_slug, tracker.active_states, assignee_filter)
+          do_fetch_by_states(project_slug, Config.active_states(), assignee_filter)
         end
     end
   end
@@ -129,15 +128,14 @@ defmodule SymphonyElixir.Linear.Client do
     if normalized_states == [] do
       {:ok, []}
     else
-      tracker = Config.settings!().tracker
-      project_slug = tracker.project_slug
+      project_slug = Linear.Config.project_slug()
 
       cond do
-        is_nil(tracker.api_key) ->
+        is_nil(Linear.Config.api_key()) ->
           {:error, :missing_linear_api_token}
 
         is_nil(project_slug) ->
-          {:error, :missing_linear_project_slug}
+          {:error, :missing_project_slug}
 
         true ->
           do_fetch_by_states(project_slug, normalized_states, nil)
@@ -381,7 +379,7 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp graphql_headers do
-    case Config.settings!().tracker.api_key do
+    case Linear.Config.api_key() do
       nil ->
         {:error, :missing_linear_api_token}
 
@@ -395,7 +393,7 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp post_graphql_request(payload, headers) do
-    Req.post(Config.settings!().tracker.endpoint,
+    Req.post(Linear.Config.endpoint(),
       headers: headers,
       json: payload,
       connect_options: [timeout: 30_000]
@@ -488,7 +486,7 @@ defmodule SymphonyElixir.Linear.Client do
   defp assignee_id(%{} = assignee), do: normalize_assignee_match_value(assignee["id"])
 
   defp routing_assignee_filter do
-    case Config.settings!().tracker.assignee do
+    case Linear.Config.assignee() do
       nil ->
         {:ok, nil}
 

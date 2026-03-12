@@ -273,11 +273,15 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
   end
 
+  @tracker_sections ["linear", "github", "memory"]
+
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
   def parse(config) when is_map(config) do
     config
     |> normalize_keys()
     |> drop_nil_values()
+    |> inject_tracker_kind()
+    |> propagate_agent_to_codex()
     |> changeset()
     |> apply_action(:validate)
     |> case do
@@ -349,6 +353,46 @@ defmodule SymphonyElixir.Config.Schema do
         end
       end)
     end)
+  end
+
+  defp inject_tracker_kind(config) do
+    detected_kind =
+      Enum.find(@tracker_sections, fn section -> Map.has_key?(config, section) end)
+
+    case detected_kind do
+      nil ->
+        config
+
+      kind ->
+        tracker = Map.get(config, "tracker", %{})
+        tracker = if is_map(tracker), do: tracker, else: %{}
+
+        unless Map.has_key?(tracker, "kind") do
+          Map.put(config, "tracker", Map.put(tracker, "kind", kind))
+        else
+          config
+        end
+    end
+  end
+
+  defp propagate_agent_to_codex(config) do
+    agent = Map.get(config, "agent", %{})
+    agent = if is_map(agent), do: agent, else: %{}
+    codex = Map.get(config, "codex", %{})
+    codex = if is_map(codex), do: codex, else: %{}
+
+    propagate_keys = ["turn_timeout_ms", "read_timeout_ms", "stall_timeout_ms"]
+
+    codex =
+      Enum.reduce(propagate_keys, codex, fn key, acc ->
+        if not Map.has_key?(acc, key) and Map.has_key?(agent, key) do
+          Map.put(acc, key, Map.get(agent, key))
+        else
+          acc
+        end
+      end)
+
+    Map.put(config, "codex", codex)
   end
 
   defp changeset(attrs) do
