@@ -49,6 +49,11 @@ defmodule SymphonyElixir.YouGile.Config do
     normalize_string(section_value("priority_sticker_id"))
   end
 
+  @spec role_sticker_id() :: String.t() | nil
+  def role_sticker_id do
+    normalize_string(section_value("role_sticker_id"))
+  end
+
   @impl SymphonyElixir.TrackerConfig
   def validate! do
     cond do

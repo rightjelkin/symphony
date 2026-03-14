@@ -233,7 +233,8 @@ defmodule SymphonyElixir.TestSupport do
       "yougile:",
       board_id && "  board_id: #{yaml_value(board_id)}",
       columns && "  columns: #{yaml_value(columns)}",
-      priority_sticker_id && "  priority_sticker_id: #{yaml_value(priority_sticker_id)}"
+      priority_sticker_id && "  priority_sticker_id: #{yaml_value(priority_sticker_id)}",
+      Keyword.get(config, :tracker_role_sticker_id) && "  role_sticker_id: #{yaml_value(Keyword.get(config, :tracker_role_sticker_id))}"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")

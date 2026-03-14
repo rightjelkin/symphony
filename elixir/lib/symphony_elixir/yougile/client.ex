@@ -36,6 +36,34 @@ defmodule SymphonyElixir.YouGile.Client do
     if issue_ids == [], do: {:ok, []}, else: do_fetch_issue_states_by_ids(issue_ids, opts)
   end
 
+  @spec fetch_comments(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_comments(task_id, opts \\ []) when is_binary(task_id) do
+    with {:ok, token} <- require_token() do
+      request_fun = Keyword.get(opts, :request_fun, &default_request_fun/1)
+      url = "#{@base_url}/chats/#{task_id}/messages?limit=#{@per_page}"
+
+      case request_fun.(%{method: :get, url: url, token: token}) do
+        {:ok, %{status: 200, body: %{"content" => content}}} when is_list(content) ->
+          comments =
+            content
+            |> Enum.reject(&(&1["deleted"] == true))
+            |> Enum.map(&normalize_comment/1)
+
+          {:ok, comments}
+
+        {:ok, %{status: 404}} ->
+          {:ok, []}
+
+        {:ok, %{status: status}} ->
+          Logger.error("YouGile fetch_comments failed status=#{status}")
+          {:error, {:yougile_api_status, status}}
+
+        {:error, reason} ->
+          {:error, {:yougile_api_request, reason}}
+      end
+    end
+  end
+
   @spec create_comment(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def create_comment(task_id, body, opts \\ []) when is_binary(task_id) and is_binary(body) do
     with {:ok, token} <- require_token() do
@@ -138,8 +166,16 @@ defmodule SymphonyElixir.YouGile.Client do
       end)
 
     case result do
-      {:ok, map} -> {:ok, Map.values(map)}
+      {:ok, map} -> {:ok, filter_by_role(Map.values(map))}
       error -> error
+    end
+  end
+
+  defp filter_by_role(issues) do
+    if YouGile.Config.role_sticker_id() do
+      Enum.filter(issues, fn issue -> issue.role != nil end)
+    else
+      issues
     end
   end
 
@@ -213,6 +249,7 @@ defmodule SymphonyElixir.YouGile.Client do
       title: task["title"],
       description: task["description"],
       priority: extract_priority(stickers),
+      role: extract_role(stickers),
       state: state_for_column_id(column_id, columns),
       branch_name: nil,
       url: nil,
@@ -245,6 +282,31 @@ defmodule SymphonyElixir.YouGile.Client do
           "empty" -> nil
           "-" -> nil
           value -> parse_priority_value(value)
+        end
+    end
+  end
+
+  defp normalize_comment(message) when is_map(message) do
+    %{
+      text: message["text"] || "",
+      from_user_id: message["fromUserId"],
+      created_at: parse_timestamp(message["id"])
+    }
+  end
+
+  defp extract_role(stickers) when map_size(stickers) == 0, do: nil
+
+  defp extract_role(stickers) do
+    case YouGile.Config.role_sticker_id() do
+      nil -> nil
+
+      sticker_id ->
+        case Map.get(stickers, sticker_id) do
+          nil -> nil
+          "empty" -> nil
+          "-" -> nil
+          value when is_binary(value) -> String.trim(value)
+          _ -> nil
         end
     end
   end

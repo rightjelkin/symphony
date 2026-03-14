@@ -146,7 +146,10 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
+  defp build_turn_prompt(issue, opts, 1, _max_turns) do
+    issue = enrich_with_comments(issue)
+    PromptBuilder.build_prompt(issue, opts)
+  end
 
   defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
     """
@@ -221,6 +224,19 @@ defmodule SymphonyElixir.AgentRunner do
     |> String.trim()
     |> String.downcase()
   end
+
+  defp enrich_with_comments(%Issue{id: issue_id} = issue) when is_binary(issue_id) do
+    case Tracker.fetch_comments(issue_id) do
+      {:ok, comments} ->
+        %{issue | comments: comments}
+
+      {:error, reason} ->
+        Logger.warning("Failed to fetch comments for #{issue_context(issue)}: #{inspect(reason)}")
+        issue
+    end
+  end
+
+  defp enrich_with_comments(issue), do: issue
 
   defp issue_context(%Issue{id: issue_id, identifier: identifier}) do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"

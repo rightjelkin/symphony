@@ -9,6 +9,7 @@ defmodule SymphonyElixir.YouGile.ClientTest do
   @col_done "col-done-uuid"
   @col_cancelled "col-cancelled-uuid"
   @priority_sticker "sticker-priority-uuid"
+  @role_sticker "sticker-role-uuid"
 
   setup do
     prev_token = System.get_env("YOUGILE_TOKEN")
@@ -299,6 +300,173 @@ defmodule SymphonyElixir.YouGile.ClientTest do
 
       assert {:ok, [issue]} = Client.fetch_candidate_issues(request_fun: request_fun)
       assert issue.priority == nil
+    end
+  end
+
+  describe "role extraction" do
+    test "extracts role from sticker and filters out tasks without role" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "yougile",
+        tracker_board_id: "board-uuid",
+        tracker_columns: %{
+          "todo" => @col_todo,
+          "in-progress" => @col_in_progress,
+          "done" => @col_done,
+          "cancelled" => @col_cancelled
+        },
+        tracker_priority_sticker_id: @priority_sticker,
+        tracker_role_sticker_id: @role_sticker
+      )
+
+      request_fun = fn %{method: :get} ->
+        {:ok,
+         %{
+           status: 200,
+           body: %{
+             "content" => [
+               task_response(%{
+                 "id" => "dev-task",
+                 "stickers" => %{@role_sticker => "developer", @priority_sticker => "1"}
+               }),
+               task_response(%{
+                 "id" => "analyst-task",
+                 "stickers" => %{@role_sticker => "analyst", @priority_sticker => "2"}
+               }),
+               task_response(%{
+                 "id" => "no-role-task",
+                 "stickers" => %{@priority_sticker => "3"}
+               })
+             ],
+             "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
+           }
+         }}
+      end
+
+      assert {:ok, issues} = Client.fetch_candidate_issues(request_fun: request_fun)
+      assert length(issues) == 2
+      dev = Enum.find(issues, &(&1.id == "dev-task"))
+      analyst = Enum.find(issues, &(&1.id == "analyst-task"))
+      assert dev.role == "developer"
+      assert analyst.role == "analyst"
+      refute Enum.any?(issues, &(&1.id == "no-role-task"))
+    end
+
+    test "returns nil role when role_sticker_id is not configured" do
+      request_fun = fn %{method: :get} ->
+        {:ok,
+         %{
+           status: 200,
+           body: %{
+             "content" => [
+               task_response(%{"stickers" => %{@role_sticker => "developer"}})
+             ],
+             "paging" => %{"count" => 1, "limit" => 100, "offset" => 0, "next" => false}
+           }
+         }}
+      end
+
+      assert {:ok, [issue]} = Client.fetch_candidate_issues(request_fun: request_fun)
+      assert issue.role == nil
+    end
+  end
+
+  describe "role-based filtering" do
+    test "filters out tasks without any role sticker when role_sticker_id is configured" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "yougile",
+        tracker_board_id: "board-uuid",
+        tracker_columns: %{
+          "todo" => @col_todo,
+          "in-progress" => @col_in_progress,
+          "done" => @col_done,
+          "cancelled" => @col_cancelled
+        },
+        tracker_role_sticker_id: @role_sticker
+      )
+
+      request_fun = fn %{method: :get} ->
+        {:ok,
+         %{
+           status: 200,
+           body: %{
+             "content" => [
+               task_response(%{
+                 "id" => "dev-task",
+                 "stickers" => %{@role_sticker => "dev"}
+               }),
+               task_response(%{
+                 "id" => "analyst-task",
+                 "stickers" => %{@role_sticker => "analyst"}
+               }),
+               task_response(%{
+                 "id" => "no-role-task",
+                 "stickers" => %{}
+               })
+             ],
+             "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
+           }
+         }}
+      end
+
+      assert {:ok, issues} = Client.fetch_candidate_issues(request_fun: request_fun)
+      ids = Enum.map(issues, & &1.id)
+      assert length(issues) == 2
+      assert "dev-task" in ids
+      assert "analyst-task" in ids
+      refute "no-role-task" in ids
+    end
+  end
+
+  describe "fetch_comments/2" do
+    test "returns normalized comments from task chat" do
+      request_fun = fn %{method: :get, url: url} ->
+        assert url =~ "/chats/task-42/messages"
+
+        {:ok,
+         %{
+           status: 200,
+           body: %{
+             "content" => [
+               %{
+                 "id" => 1_700_000_000_000,
+                 "text" => "Please fix the tests",
+                 "fromUserId" => "user-abc",
+                 "deleted" => false
+               },
+               %{
+                 "id" => 1_700_000_001_000,
+                 "text" => "deleted message",
+                 "fromUserId" => "user-abc",
+                 "deleted" => true
+               },
+               %{
+                 "id" => 1_700_000_002_000,
+                 "text" => "Also update the docs",
+                 "fromUserId" => "user-def"
+               }
+             ],
+             "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
+           }
+         }}
+      end
+
+      assert {:ok, comments} = Client.fetch_comments("task-42", request_fun: request_fun)
+      assert length(comments) == 2
+      assert hd(comments).text == "Please fix the tests"
+      assert hd(comments).from_user_id == "user-abc"
+      assert List.last(comments).text == "Also update the docs"
+    end
+
+    test "returns empty list on 404" do
+      request_fun = fn _ -> {:ok, %{status: 404}} end
+      assert {:ok, []} = Client.fetch_comments("missing-task", request_fun: request_fun)
+    end
+
+    test "returns error on API failure" do
+      request_fun = fn _ -> {:ok, %{status: 500}} end
+
+      assert {:error, {:yougile_api_status, 500}} =
+               Client.fetch_comments("task-42", request_fun: request_fun)
     end
   end
 end

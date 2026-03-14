@@ -37,6 +37,9 @@ defmodule SymphonyElixir.GitHub.Tracker do
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
   def fetch_issue_states_by_ids(issue_ids), do: client_module().fetch_issue_states_by_ids(issue_ids)
 
+  @spec fetch_comments(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_comments(_issue_id), do: {:ok, []}
+
   @spec create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   def create_comment(issue_id, body) when is_binary(issue_id) and is_binary(body) do
     client_module().create_comment(issue_id, body)
