@@ -675,7 +675,18 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       worker_host ->
+        move_to_in_progress(issue)
         spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+    end
+  end
+
+  defp move_to_in_progress(issue) do
+    case Tracker.update_issue_state(issue.id, "in-progress") do
+      :ok ->
+        Logger.info("Moved #{issue_context(issue)} to in-progress")
+
+      {:error, reason} ->
+        Logger.warning("Failed to move #{issue_context(issue)} to in-progress: #{inspect(reason)}")
     end
   end
 
