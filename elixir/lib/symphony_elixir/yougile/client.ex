@@ -132,7 +132,7 @@ defmodule SymphonyElixir.YouGile.Client do
 
           case request_fun.(%{method: :get, url: url, token: token}) do
             {:ok, %{status: 200, body: body}} when is_map(body) ->
-              {:cont, {:ok, [normalize_task(body, columns) | acc]}}
+              {:cont, {:ok, [normalize_task(body, columns, request_fun) | acc]}}
 
             {:ok, %{status: 404}} ->
               {:cont, {:ok, acc}}
@@ -188,7 +188,7 @@ defmodule SymphonyElixir.YouGile.Client do
 
     case request_fun.(%{method: :get, url: url, token: token}) do
       {:ok, %{status: 200, body: %{"content" => content, "paging" => paging}}} when is_list(content) ->
-        tasks = Enum.map(content, &normalize_task(&1, columns))
+        tasks = Enum.map(content, &normalize_task(&1, columns, request_fun))
         all = acc ++ tasks
 
         if paging["next"] == true do
@@ -198,7 +198,7 @@ defmodule SymphonyElixir.YouGile.Client do
         end
 
       {:ok, %{status: 200, body: %{"content" => content}}} when is_list(content) ->
-        {:ok, acc ++ Enum.map(content, &normalize_task(&1, columns))}
+        {:ok, acc ++ Enum.map(content, &normalize_task(&1, columns, request_fun))}
 
       {:ok, %{status: status}} ->
         Logger.error("YouGile API request failed status=#{status}")
@@ -238,7 +238,7 @@ defmodule SymphonyElixir.YouGile.Client do
     end
   end
 
-  defp normalize_task(task, columns) when is_map(task) do
+  defp normalize_task(task, columns, request_fun) when is_map(task) do
     task_id = task["id"]
     column_id = task["columnId"]
     stickers = task["stickers"] || %{}
@@ -249,7 +249,7 @@ defmodule SymphonyElixir.YouGile.Client do
       title: task["title"],
       description: task["description"],
       priority: extract_priority(stickers),
-      role: extract_role(stickers),
+      role: extract_role(stickers, request_fun),
       state: state_for_column_id(column_id, columns),
       branch_name: nil,
       url: nil,
@@ -294,9 +294,9 @@ defmodule SymphonyElixir.YouGile.Client do
     }
   end
 
-  defp extract_role(stickers) when map_size(stickers) == 0, do: nil
+  defp extract_role(stickers, _request_fun) when map_size(stickers) == 0, do: nil
 
-  defp extract_role(stickers) do
+  defp extract_role(stickers, request_fun) do
     case YouGile.Config.role_sticker_id() do
       nil -> nil
 
@@ -305,9 +305,48 @@ defmodule SymphonyElixir.YouGile.Client do
           nil -> nil
           "empty" -> nil
           "-" -> nil
-          value when is_binary(value) -> String.trim(value)
+          state_id when is_binary(state_id) ->
+            resolve_sticker_state_name(sticker_id, state_id, request_fun)
           _ -> nil
         end
+    end
+  end
+
+  defp resolve_sticker_state_name(sticker_id, state_id, request_fun) do
+    states_map = get_or_fetch_sticker_states(sticker_id, request_fun)
+    Map.get(states_map, state_id, state_id)
+  end
+
+  defp get_or_fetch_sticker_states(sticker_id, request_fun) do
+    cache_key = {:yougile_sticker_states, sticker_id}
+
+    case Process.get(cache_key) do
+      nil ->
+        states_map = fetch_sticker_states(sticker_id, request_fun)
+        Process.put(cache_key, states_map)
+        states_map
+
+      cached ->
+        cached
+    end
+  end
+
+  defp fetch_sticker_states(sticker_id, request_fun) do
+    with {:ok, token} <- require_token() do
+      case request_fun.(%{
+             method: :get,
+             url: "#{@base_url}/string-stickers/#{sticker_id}",
+             token: token
+           }) do
+        {:ok, %{status: 200, body: %{"states" => states}}} when is_list(states) ->
+          Map.new(states, fn %{"id" => id, "name" => name} -> {id, name} end)
+
+        other ->
+          Logger.warning("Failed to fetch sticker states for #{sticker_id}: #{inspect(other)}")
+          %{}
+      end
+    else
+      _ -> %{}
     end
   end
 

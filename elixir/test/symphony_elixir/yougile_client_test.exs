@@ -304,7 +304,7 @@ defmodule SymphonyElixir.YouGile.ClientTest do
   end
 
   describe "role extraction" do
-    test "extracts role from sticker and filters out tasks without role" do
+    test "resolves role state_id to name via sticker API" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "yougile",
         tracker_board_id: "board-uuid",
@@ -318,28 +318,45 @@ defmodule SymphonyElixir.YouGile.ClientTest do
         tracker_role_sticker_id: @role_sticker
       )
 
-      request_fun = fn %{method: :get} ->
-        {:ok,
-         %{
-           status: 200,
-           body: %{
-             "content" => [
-               task_response(%{
-                 "id" => "dev-task",
-                 "stickers" => %{@role_sticker => "developer", @priority_sticker => "1"}
-               }),
-               task_response(%{
-                 "id" => "analyst-task",
-                 "stickers" => %{@role_sticker => "analyst", @priority_sticker => "2"}
-               }),
-               task_response(%{
-                 "id" => "no-role-task",
-                 "stickers" => %{@priority_sticker => "3"}
-               })
-             ],
-             "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
-           }
-         }}
+      request_fun = fn %{method: :get, url: url} ->
+        cond do
+          url =~ "/string-stickers/#{@role_sticker}" ->
+            {:ok,
+             %{
+               status: 200,
+               body: %{
+                 "id" => @role_sticker,
+                 "name" => "role",
+                 "states" => [
+                   %{"id" => "state-dev", "name" => "developer", "color" => "#F5C24D"},
+                   %{"id" => "state-analyst", "name" => "analyst", "color" => "#CA79DB"}
+                 ]
+               }
+             }}
+
+          true ->
+            {:ok,
+             %{
+               status: 200,
+               body: %{
+                 "content" => [
+                   task_response(%{
+                     "id" => "dev-task",
+                     "stickers" => %{@role_sticker => "state-dev", @priority_sticker => "1"}
+                   }),
+                   task_response(%{
+                     "id" => "analyst-task",
+                     "stickers" => %{@role_sticker => "state-analyst", @priority_sticker => "2"}
+                   }),
+                   task_response(%{
+                     "id" => "no-role-task",
+                     "stickers" => %{@priority_sticker => "3"}
+                   })
+                 ],
+                 "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
+               }
+             }}
+        end
       end
 
       assert {:ok, issues} = Client.fetch_candidate_issues(request_fun: request_fun)
@@ -358,7 +375,7 @@ defmodule SymphonyElixir.YouGile.ClientTest do
            status: 200,
            body: %{
              "content" => [
-               task_response(%{"stickers" => %{@role_sticker => "developer"}})
+               task_response(%{"stickers" => %{@role_sticker => "state-dev"}})
              ],
              "paging" => %{"count" => 1, "limit" => 100, "offset" => 0, "next" => false}
            }
@@ -384,28 +401,45 @@ defmodule SymphonyElixir.YouGile.ClientTest do
         tracker_role_sticker_id: @role_sticker
       )
 
-      request_fun = fn %{method: :get} ->
-        {:ok,
-         %{
-           status: 200,
-           body: %{
-             "content" => [
-               task_response(%{
-                 "id" => "dev-task",
-                 "stickers" => %{@role_sticker => "dev"}
-               }),
-               task_response(%{
-                 "id" => "analyst-task",
-                 "stickers" => %{@role_sticker => "analyst"}
-               }),
-               task_response(%{
-                 "id" => "no-role-task",
-                 "stickers" => %{}
-               })
-             ],
-             "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
-           }
-         }}
+      request_fun = fn %{method: :get, url: url} ->
+        cond do
+          url =~ "/string-stickers/#{@role_sticker}" ->
+            {:ok,
+             %{
+               status: 200,
+               body: %{
+                 "id" => @role_sticker,
+                 "name" => "role",
+                 "states" => [
+                   %{"id" => "state-dev", "name" => "dev", "color" => "#F5C24D"},
+                   %{"id" => "state-analyst", "name" => "analyst", "color" => "#CA79DB"}
+                 ]
+               }
+             }}
+
+          true ->
+            {:ok,
+             %{
+               status: 200,
+               body: %{
+                 "content" => [
+                   task_response(%{
+                     "id" => "dev-task",
+                     "stickers" => %{@role_sticker => "state-dev"}
+                   }),
+                   task_response(%{
+                     "id" => "analyst-task",
+                     "stickers" => %{@role_sticker => "state-analyst"}
+                   }),
+                   task_response(%{
+                     "id" => "no-role-task",
+                     "stickers" => %{}
+                   })
+                 ],
+                 "paging" => %{"count" => 3, "limit" => 100, "offset" => 0, "next" => false}
+               }
+             }}
+        end
       end
 
       assert {:ok, issues} = Client.fetch_candidate_issues(request_fun: request_fun)

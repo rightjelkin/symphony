@@ -681,12 +681,14 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp move_to_in_progress(issue) do
-    case Tracker.update_issue_state(issue.id, "in-progress") do
-      :ok ->
-        Logger.info("Moved #{issue_context(issue)} to in-progress")
+    if Config.tracker_kind() == "yougile" do
+      case Tracker.update_issue_state(issue.id, "in-progress") do
+        :ok ->
+          Logger.info("Moved #{issue_context(issue)} to in-progress")
 
-      {:error, reason} ->
-        Logger.warning("Failed to move #{issue_context(issue)} to in-progress: #{inspect(reason)}")
+        {:error, reason} ->
+          Logger.warning("Failed to move #{issue_context(issue)} to in-progress: #{inspect(reason)}")
+      end
     end
   end
 

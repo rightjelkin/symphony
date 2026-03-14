@@ -48,13 +48,20 @@ defmodule SymphonyElixir.AgentRunner do
       {:ok, workspace} ->
         send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace)
 
-        try do
-          with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+        result =
+          try do
+            with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
+              run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            end
+          after
+            Workspace.run_after_run_hook(workspace, issue, worker_host)
           end
-        after
-          Workspace.run_after_run_hook(workspace, issue, worker_host)
+
+        if result == :ok do
+          move_to_review(issue)
         end
+
+        result
 
       {:error, reason} ->
         {:error, reason}
@@ -91,6 +98,18 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
+
+  defp move_to_review(issue) do
+    if Config.tracker_kind() == "yougile" do
+      case Tracker.update_issue_state(issue.id, "in-review") do
+        :ok ->
+          Logger.info("Moved #{issue_context(issue)} to in-review after agent completion")
+
+        {:error, reason} ->
+          Logger.warning("Failed to move #{issue_context(issue)} to in-review: #{inspect(reason)}")
+      end
+    end
+  end
 
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)

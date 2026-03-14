@@ -3,6 +3,8 @@ defmodule SymphonyElixir.PromptBuilder do
   Builds agent prompts from issue data.
   """
 
+  require Logger
+
   alias SymphonyElixir.{Config, Workflow}
 
   @render_opts [strict_filters: true]
@@ -14,16 +16,21 @@ defmodule SymphonyElixir.PromptBuilder do
       |> prompt_template!()
       |> parse_template!()
 
-    template
-    |> Solid.render!(
-      %{
-        "attempt" => Keyword.get(opts, :attempt),
-        "issue" => issue |> Map.from_struct() |> to_solid_map()
-      },
-      @render_opts
-    )
-    |> IO.iodata_to_binary()
-    |> ensure_utf8()
+    rendered =
+      template
+      |> Solid.render!(
+        %{
+          "attempt" => Keyword.get(opts, :attempt),
+          "issue" => issue |> Map.from_struct() |> to_solid_map()
+        },
+        @render_opts
+      )
+      |> IO.iodata_to_binary()
+      |> ensure_utf8()
+
+    Logger.info("Rendered prompt for issue_id=#{issue.id} role=#{inspect(issue.role)}:\n#{rendered}")
+
+    rendered
   end
 
   defp prompt_template!({:ok, %{prompt_template: prompt}}), do: default_prompt(prompt)
