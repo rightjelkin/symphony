@@ -58,6 +58,7 @@ defmodule SymphonyElixir.AgentRunner do
           end
 
         if result == :ok do
+          post_summary_comment(workspace, issue)
           move_to_review(issue)
         end
 
@@ -99,6 +100,48 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
+  defp post_summary_comment(workspace, issue) do
+    if Config.tracker_kind() == "yougile" do
+      summary_path = Path.join(workspace, "#{issue.identifier}.md")
+
+      case File.read(summary_path) do
+        {:ok, content} when byte_size(content) > 0 ->
+          case Tracker.create_comment(issue.id, String.trim(content)) do
+            :ok ->
+              Logger.info("Posted summary comment for #{issue_context(issue)} from #{summary_path}")
+
+            {:error, reason} ->
+              Logger.warning("Failed to post summary comment for #{issue_context(issue)}: #{inspect(reason)}")
+          end
+
+        {:ok, _empty} ->
+          Logger.info("Summary file is empty for #{issue_context(issue)}, skipping comment")
+
+        {:error, :enoent} ->
+          Logger.info("No summary file found at #{summary_path} for #{issue_context(issue)}, skipping comment")
+
+        {:error, reason} ->
+          Logger.warning("Failed to read summary file for #{issue_context(issue)}: #{inspect(reason)}")
+      end
+    end
+  end
+
+  defp cleanup_summary_file(workspace, issue) do
+    if Config.tracker_kind() == "yougile" do
+      path = Path.join(workspace, "#{issue.identifier}.md")
+
+      if File.exists?(path) do
+        File.rm(path)
+        Logger.info("Removed previous summary file #{path} for #{issue_context(issue)}")
+      end
+    end
+  end
+
+  defp summary_file_exists?(workspace, issue) do
+    Config.tracker_kind() == "yougile" and
+      File.exists?(Path.join(workspace, "#{issue.identifier}.md"))
+  end
+
   defp move_to_review(issue) do
     if Config.tracker_kind() == "yougile" do
       case Tracker.update_issue_state(issue.id, "in-review") do
@@ -114,6 +157,7 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    cleanup_summary_file(workspace, issue)
 
     with {:ok, session} <- CodingAgent.start_session(workspace, worker_host: worker_host) do
       try do
@@ -138,18 +182,23 @@ defmodule SymphonyElixir.AgentRunner do
 
       case continue_with_issue?(issue, issue_state_fetcher) do
         {:continue, refreshed_issue} when turn_number < max_turns ->
-          Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
+          if summary_file_exists?(workspace, refreshed_issue) do
+            Logger.info("Summary file found for #{issue_context(refreshed_issue)}, agent work complete turn=#{turn_number}/#{max_turns}")
+            :ok
+          else
+            Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
-          do_run_codex_turns(
-            app_session,
-            workspace,
-            refreshed_issue,
-            codex_update_recipient,
-            opts,
-            issue_state_fetcher,
-            turn_number + 1,
-            max_turns
-          )
+            do_run_codex_turns(
+              app_session,
+              workspace,
+              refreshed_issue,
+              codex_update_recipient,
+              opts,
+              issue_state_fetcher,
+              turn_number + 1,
+              max_turns
+            )
+          end
 
         {:continue, refreshed_issue} ->
           Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
@@ -170,15 +219,22 @@ defmodule SymphonyElixir.AgentRunner do
     PromptBuilder.build_prompt(issue, opts)
   end
 
-  defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
+  defp build_turn_prompt(issue, opts, turn_number, max_turns) do
+    issue = enrich_with_comments(issue)
+    original_prompt = PromptBuilder.build_prompt(issue, opts)
+
     """
     Continuation guidance:
 
     - The previous turn completed normally, but the issue is still in an active state.
     - This is continuation turn ##{turn_number} of #{max_turns} for the current agent run.
-    - Resume from the current workspace and workpad state instead of restarting from scratch.
-    - The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.
-    - Focus on the remaining ticket work and do not end the turn while the issue stays active unless you are truly blocked.
+    - Resume from the current workspace state instead of restarting from scratch.
+    - Review what has already been done (check git log, existing files) and focus on completing the remaining steps.
+    - Do not end the turn while there is still unfinished work from the original instructions.
+
+    Original task instructions (for reference):
+
+    #{original_prompt}
     """
   end
 
